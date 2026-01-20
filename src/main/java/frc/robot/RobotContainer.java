@@ -4,6 +4,15 @@
 
 package frc.robot;
 
+import java.io.File;
+import java.io.IOException;
+
+import choreo.auto.AutoChooser;
+import choreo.auto.AutoFactory;
+import choreo.auto.AutoRoutine;
+import choreo.auto.AutoTrajectory;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
@@ -20,16 +29,54 @@ import frc.robot.subsystems.ExampleSubsystem;
  */
 public class RobotContainer {
   // The robot's subsystems and commands are defined here...
-  private final ExampleSubsystem m_exampleSubsystem = new ExampleSubsystem();
-
+  private final SwerveSubsystem m_drive  = new SwerveSubsystem(Constants.SwerveConstants.kSwerveJsonDirectory);
+                                                                            
   // Replace with CommandPS4Controller or CommandJoystick if needed
   private final CommandXboxController m_driverController =
       new CommandXboxController(OperatorConstants.kDriverControllerPort);
+
+  SwerveInputStream driveAngularVelocity = SwerveInputStream.of(m_drive.getSwerveDrive(),
+                                                                () -> m_driverController.getLeftY() * -1,
+                                                                () -> m_driverController.getLeftX() * -1)
+                                                            .withControllerRotationAxis(m_driverController::getRightX)
+                                                            .deadband(OperatorConstants.DEADBAND)
+                                                            .scaleTranslation(0.8)
+                                                            .allianceRelativeControl(true);
+
+  /**
+   * Clone's the angular velocity input stream and converts it to a fieldRelative input stream.
+   */
+  SwerveInputStream driveDirectAngle = driveAngularVelocity.copy().withControllerHeadingAxis(m_driverController::getRightX,
+                                                                                             m_driverController::getRightY)
+                                                           .headingWhile(true);
+
+  public final AutoChooser m_autoChooser = new AutoChooser();
+  private final AutoFactory m_autoFactory =
+      new AutoFactory(
+          m_drive::getPose, m_drive::resetOdometry, m_drive::followTrajectory, true, m_drive);
+
+  private AutoRoutine getTestAuto1() { 
+    AutoRoutine r = m_autoFactory.newRoutine("Test Auto 1");
+    AutoTrajectory mainTraj = r.trajectory("Test Auto 1");
+    r.active().onTrue(Commands.sequence(mainTraj.resetOdometry(), mainTraj.cmd()));
+    return r;
+  }
+
+  private AutoRoutine getTestAutoExample() {
+    AutoRoutine r = m_autoFactory.newRoutine("Test Auto Example");
+    AutoTrajectory mainTraj = r.trajectory("Test Auto Example");
+    r.active().onTrue(Commands.sequence(mainTraj.resetOdometry(), mainTraj.cmd()));
+    return r;
+  }
 
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
     // Configure the trigger bindings
     configureBindings();
+    DriverStation.silenceJoystickConnectionWarning(true);
+
+    m_autoChooser.addRoutine("Test Auto 1", this::getTestAuto1);
+    m_autoChooser.addRoutine("Test Auto Example", this::getTestAutoExample);
   }
 
   /**
@@ -42,9 +89,19 @@ public class RobotContainer {
    * joysticks}.
    */
   private void configureBindings() {
-    // Schedule `ExampleCommand` when `exampleCondition` changes to `true`
-    new Trigger(m_exampleSubsystem::exampleCondition)
-        .onTrue(new ExampleCommand(m_exampleSubsystem));
+    Command driveFieldOrientedDirectAngle      = m_drive.driveFieldOriented(driveDirectAngle);
+    Command driveFieldOrientedAnglularVelocity = m_drive.driveFieldOriented(driveAngularVelocity);
+    Command driveSetpointGen = m_drive.driveWithSetpointGeneratorFieldRelative(
+        driveDirectAngle);
+
+    m_drive.setDefaultCommand(driveFieldOrientedAnglularVelocity);
+
+    m_driverController.a().onTrue((Commands.runOnce(m_drive::zeroGyro)));
+    m_driverController.x().onTrue(Commands.runOnce(m_drive::addFakeVisionReading));
+    m_driverController.start().whileTrue(Commands.none());
+    m_driverController.back().whileTrue(Commands.none());
+    m_driverController.leftBumper().whileTrue(Commands.runOnce(m_drive::lock, m_drive).repeatedly());
+    m_driverController.rightBumper().onTrue(Commands.none());
 
     // Schedule `exampleMethodCommand` when the Xbox controller's B button is pressed,
     // cancelling on release.

@@ -85,6 +85,7 @@ public class Robot extends TimedRobot {
   public void testInit() {
     // Cancels all running commands at the start of test mode.
     CommandScheduler.getInstance().cancelAll();
+    
   }
 
   /** This function is called periodically during test mode. */
@@ -98,4 +99,13 @@ public class Robot extends TimedRobot {
   /** This function is called periodically whilst in simulation. */
   @Override
   public void simulationPeriodic() {}
+
+  @Override
+  public void autonomousInit() {
+    m_autonomousCommand = m_robotContainer.m_autoChooser.selectedCommand();
+
+    if (m_autonomousCommand != null) {
+      m_autonomousCommand.schedule();
+    }
+  }
 }
